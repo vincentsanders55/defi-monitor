@@ -1257,7 +1257,7 @@ async function update() {
         <span style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px;">${positions.length} active position${positions.length > 1 ? 's' : ''}</span>
       </div>
       ${cards.map(c => c.html).join('<div style="border-top: 2px solid var(--border);"></div>')}
-      ${btcChartHtml}
+      <div id="btc-chart-container" style="margin-top: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card-bg);">${btcChartHtml}</div>
     `;
   } catch (err) {
     console.error('Update error:', err);
@@ -1267,16 +1267,21 @@ async function update() {
   }
 }
 
-// BTC 5-day chart
-async function fetchBtc5dChart() {
+// BTC chart with period selector
+const btcChartCache = {};
+let btcChartPeriod = 5;
+
+async function fetchBtcChart(days) {
+  if (btcChartCache[days] && Date.now() - btcChartCache[days].ts < 300000) return btcChartCache[days].data;
   try {
-    const res = await fetch('https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=5');
+    const res = await fetch(`https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=${days}`);
     const data = await res.json();
-    return data.prices; // [[timestamp, price], ...]
+    btcChartCache[days] = { data: data.prices, ts: Date.now() };
+    return data.prices;
   } catch { return null; }
 }
 
-function renderBtcChart(prices) {
+function renderBtcChart(prices, activeDays) {
   if (!prices || prices.length < 2) return '<div style="padding:20px;color:var(--text-dim);font-size:11px;">BTC chart unavailable</div>';
   const vals = prices.map(p => p[1]);
   const minP = Math.min(...vals);
@@ -1297,22 +1302,31 @@ function renderBtcChart(prices) {
     path += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
   });
 
-  // Area fill
   const lastX = (vals.length - 1) * stepX;
   const areaPath = path + ` L${lastX.toFixed(1)},${h} L0,${h} Z`;
-
   const color = isUp ? '#3fb950' : '#f85149';
   const colorFaint = isUp ? 'rgba(63,185,80,0.08)' : 'rgba(248,81,73,0.08)';
 
-  // Date labels
   const firstDate = new Date(prices[0][0]);
   const lastDate = new Date(prices[prices.length - 1][0]);
   const fmtDate = d => d.toLocaleDateString('en', { month: 'short', day: 'numeric' });
 
+  const periods = [
+    { days: 5, label: '5D' },
+    { days: 30, label: '1M' },
+    { days: 90, label: '3M' },
+  ];
+  const btnStyle = (d) => `cursor:pointer; padding: 2px 8px; border-radius: 4px; border: 1px solid ${d === activeDays ? 'var(--text)' : 'var(--border)'}; background: ${d === activeDays ? 'var(--text)' : 'transparent'}; color: ${d === activeDays ? 'var(--bg)' : 'var(--text-dim)'}; font-size: 9px; font-weight: 600;`;
+
   return `
-    <div style="padding: 16px 20px; border-top: 1px solid var(--border);">
+    <div style="padding: 16px 20px;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-        <span style="font-size: 11px; font-weight: 600; color: var(--text);">BTC · 5 days</span>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 11px; font-weight: 600; color: var(--text);">BTC</span>
+          <div style="display: flex; gap: 4px;">
+            ${periods.map(p => `<span style="${btnStyle(p.days)}" onclick="switchBtcPeriod(${p.days})">${p.label}</span>`).join('')}
+          </div>
+        </div>
         <span style="font-size: 11px; color: ${color}; font-weight: 600;">$${formatNum(last, 0)} (${isUp ? '+' : ''}${change.toFixed(1)}%)</span>
       </div>
       <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="none">
@@ -1328,10 +1342,22 @@ function renderBtcChart(prices) {
   `;
 }
 
+async function updateBtcChart() {
+  const prices = await fetchBtcChart(btcChartPeriod);
+  btcChartHtml = renderBtcChart(prices, btcChartPeriod);
+  const el = document.getElementById('btc-chart-container');
+  if (el) el.innerHTML = btcChartHtml;
+}
+
+function switchBtcPeriod(days) {
+  btcChartPeriod = days;
+  updateBtcChart();
+}
+
 // Start
 let btcChartHtml = '';
-fetchBtc5dChart().then(prices => { btcChartHtml = renderBtcChart(prices); });
-setInterval(() => fetchBtc5dChart().then(prices => { btcChartHtml = renderBtcChart(prices); }), 300000); // refresh chart every 5min
+updateBtcChart();
+setInterval(updateBtcChart, 300000);
 
 update();
 setInterval(update, CONFIG.refreshInterval);
