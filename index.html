@@ -785,21 +785,21 @@ async function fetchBtcPriceAtTime(timestamp) {
   const key = timestamp.toString();
   if (entryPriceCache[key]) return entryPriceCache[key];
 
-  try {
-    // CoinGecko market_chart/range — returns price data points
-    const from = timestamp - 300; // 5 min before
-    const to = timestamp + 300;   // 5 min after
-    const resp = await fetch(`https://api.coingecko.com/api/v3/coins/bitcoin/market_chart/range?vs_currency=usd&from=${from}&to=${to}`);
-    const json = await resp.json();
-    if (json.prices && json.prices.length > 0) {
-      // Take closest data point
-      const price = json.prices[0][1];
-      entryPriceCache[key] = price;
-      console.log('BTC entry price:', price);
-      return price;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 3000));
+      const from = timestamp - 300;
+      const to = timestamp + 300;
+      const resp = await fetch(`https://api.coingecko.com/api/v3/coins/bitcoin/market_chart/range?vs_currency=usd&from=${from}&to=${to}`);
+      if (resp.status === 429) continue;
+      const json = await resp.json();
+      if (json.prices && json.prices.length > 0) {
+        entryPriceCache[key] = json.prices[0][1];
+        return entryPriceCache[key];
+      }
+    } catch (e) {
+      console.warn('CoinGecko historical price attempt', attempt, e);
     }
-  } catch (e) {
-    console.warn('CoinGecko historical price failed:', e);
   }
   return null;
 }
@@ -1370,18 +1370,22 @@ async function switchBtcPeriod(days) {
   await updateBtcChart();
 }
 
-// Start — preload all periods with staggered delays to avoid rate limit
+// Start — chart loads AFTER first update to avoid CoinGecko rate limit
 let btcChartHtml = '';
 (async () => {
+  await update();
+  // Wait before chart calls — CoinGecko needs breathing room
+  await new Promise(r => setTimeout(r, 5000));
   await fetchBtcChart(5);
   updateBtcChart();
-  setTimeout(() => fetchBtcChart(30), 3000);
-  setTimeout(() => fetchBtcChart(90), 6000);
+  await new Promise(r => setTimeout(r, 5000));
+  fetchBtcChart(30);
+  await new Promise(r => setTimeout(r, 5000));
+  fetchBtcChart(90);
+  // Then loop
+  setInterval(update, CONFIG.refreshInterval);
+  setInterval(updateBtcChart, 300000);
 })();
-setInterval(updateBtcChart, 300000);
-
-update();
-setInterval(update, CONFIG.refreshInterval);
 </script>
 
 </body>
