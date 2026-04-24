@@ -1290,9 +1290,16 @@ async function fetchBtcChart(days) {
 
 function renderBtcChart(prices, activeDays) {
   if (!prices || prices.length < 2) return '<div style="padding:20px;color:var(--text-dim);font-size:11px;">BTC chart unavailable</div>';
-  const vals = prices.map(p => p[1]);
-  const minP = Math.min(...vals);
-  const maxP = Math.max(...vals);
+  // Downsample to max 200 points
+  let sampled = prices;
+  if (prices.length > 200) {
+    const step = Math.ceil(prices.length / 200);
+    sampled = prices.filter((_, i) => i % step === 0);
+    if (sampled[sampled.length - 1] !== prices[prices.length - 1]) sampled.push(prices[prices.length - 1]);
+  }
+  const vals = sampled.map(p => p[1]);
+  let minP = vals[0], maxP = vals[0];
+  for (let i = 1; i < vals.length; i++) { if (vals[i] < minP) minP = vals[i]; if (vals[i] > maxP) maxP = vals[i]; }
   const first = vals[0];
   const last = vals[vals.length - 1];
   const change = ((last - first) / first) * 100;
@@ -1314,8 +1321,8 @@ function renderBtcChart(prices, activeDays) {
   const color = isUp ? '#3fb950' : '#f85149';
   const colorFaint = isUp ? 'rgba(63,185,80,0.08)' : 'rgba(248,81,73,0.08)';
 
-  const firstDate = new Date(prices[0][0]);
-  const lastDate = new Date(prices[prices.length - 1][0]);
+  const firstDate = new Date(sampled[0][0]);
+  const lastDate = new Date(sampled[sampled.length - 1][0]);
   const fmtDate = d => d.toLocaleDateString('en', { month: 'short', day: 'numeric' });
 
   const periods = [
