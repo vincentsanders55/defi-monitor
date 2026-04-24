@@ -1,0 +1,1287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DeFi Position Monitor</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --green: #3fb950;
+    --orange: #d29922;
+    --red: #f85149;
+    --blue: #58a6ff;
+    --purple: #bc8cff;
+  }
+
+  body {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+    padding: 20px;
+  }
+
+  .widget {
+    width: 420px;
+    max-height: 95vh;
+    overflow-y: auto;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+
+  .header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .pool-name {
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .chain-badge {
+    font-size: 10px;
+    background: #2563eb;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+  }
+
+  .fee-badge {
+    font-size: 10px;
+    background: var(--border);
+    color: var(--text-dim);
+    padding: 2px 8px;
+    border-radius: 10px;
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .status-dot.live { background: var(--green); animation: pulse 2s infinite; }
+  .status-dot.warning { background: var(--orange); animation: pulse 1s infinite; }
+  .status-dot.danger { background: var(--red); animation: pulse 0.5s infinite; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .refresh-info {
+    font-size: 10px;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  /* Range visualizer */
+  .range-section {
+    padding: 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .range-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .range-bar-container {
+    position: relative;
+    height: 36px;
+    background: #21262d;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 8px;
+  }
+
+  .range-bar-fill {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    background: linear-gradient(90deg, rgba(63,185,80,0.15), rgba(63,185,80,0.25), rgba(63,185,80,0.15));
+    border-left: 2px solid var(--green);
+    border-right: 2px solid var(--green);
+  }
+
+  .range-bar-cursor {
+    position: absolute;
+    top: 2px;
+    bottom: 2px;
+    width: 3px;
+    background: white;
+    border-radius: 2px;
+    z-index: 2;
+    box-shadow: 0 0 8px rgba(255,255,255,0.5);
+  }
+
+  .range-prices {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+
+  .range-prices .current {
+    color: white;
+    font-weight: 600;
+  }
+
+  /* Status banner */
+  .status-banner {
+    padding: 10px 20px;
+    text-align: center;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .status-banner.in-range { background: rgba(63,185,80,0.1); color: var(--green); }
+  .status-banner.near-edge { background: rgba(210,153,34,0.1); color: var(--orange); }
+  .status-banner.out-of-range { background: rgba(248,81,73,0.1); color: var(--red); }
+
+  /* KPI grid */
+  .kpi-grid {
+    padding: 16px 20px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .kpi {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .kpi-label {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .kpi-value {
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .kpi-value.small {
+    font-size: 14px;
+  }
+
+  .kpi-sub {
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+
+  .kpi-value.positive { color: var(--green); }
+  .kpi-value.negative { color: var(--red); }
+  .kpi-value.neutral { color: var(--text); }
+
+  /* Fees section */
+  .fees-section {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .fees-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    font-size: 13px;
+  }
+
+  .fees-row .label { color: var(--text-dim); }
+  .fees-row .value { font-weight: 600; }
+
+  /* Footer */
+  .footer {
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+
+  .footer a {
+    color: var(--blue);
+    text-decoration: none;
+  }
+
+  .loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    gap: 12px;
+  }
+
+  .spinner {
+    width: 24px;
+    height: 24px;
+    border: 2px solid var(--border);
+    border-top-color: var(--blue);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .error-msg {
+    color: var(--red);
+    font-size: 12px;
+    text-align: center;
+    padding: 12px;
+  }
+
+  .kpi-wide {
+    grid-column: 1 / -1;
+  }
+
+  .distance-bar {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    margin-top: 4px;
+  }
+
+  .distance-bar .bar {
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+  }
+
+  .distance-bar .bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.3s;
+  }
+
+  .distance-bar .pct {
+    font-size: 10px;
+    min-width: 35px;
+    text-align: right;
+  }
+</style>
+</head>
+<body>
+
+<div class="widget" id="widget">
+  <div class="loading" id="loading">
+    <div class="spinner"></div>
+    <span style="font-size: 12px; color: var(--text-dim);">Loading on-chain data...</span>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// CONFIG
+// ============================================================
+const CONFIG = {
+  walletAddress: '0xAD4D00A7Fda0E15A9aF57b26fF9b162D966878B7',
+  sickleAddress: '0x2EEDfAAd14D5333Ec4455a1E549A608684e7F890',
+  nftManager: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1',
+  refreshInterval: 30000,
+  rpcUrls: [
+    'https://base.llamarpc.com',
+    'https://base-rpc.publicnode.com',
+    'https://1rpc.io/base',
+    'https://mainnet.base.org',
+  ],
+  rpcIndex: 0,
+  // Known token decimals by address (lowercase)
+  tokenDecimals: {
+    '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': 6,  // USDC
+    '0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf': 8,  // cbBTC
+    '0x4200000000000000000000000000000000000006': 18, // WETH
+  },
+  tokenSymbols: {
+    '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': 'USDC',
+    '0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf': 'cbBTC',
+    '0x4200000000000000000000000000000000000006': 'WETH',
+  },
+  // Fee tier to label
+  feeTierLabel: { 100: '0.01%', 500: '0.05%', 3000: '0.3%', 10000: '1%' },
+};
+
+// ============================================================
+// ABI fragments (minimal)
+// ============================================================
+const POOL_ABI = {
+  slot0: 'function slot0() view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)',
+};
+
+const NFT_ABI = {
+  positions: 'function positions(uint256 tokenId) view returns (uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)',
+};
+
+// ============================================================
+// RPC helpers (raw eth_call, no library needed)
+// ============================================================
+function encodeFunctionCall(sig, params = []) {
+  // Simple ABI encoder for our specific calls
+  const hash = fnSelector(sig);
+  let data = '0x' + hash;
+  for (const p of params) {
+    data += BigInt(p).toString(16).padStart(64, '0');
+  }
+  return data;
+}
+
+function fnSelector(sig) {
+  // keccak256 of function signature
+  const encoder = new TextEncoder();
+  const data = encoder.encode(sig);
+  return keccak256(data).slice(0, 8);
+}
+
+// Minimal keccak256 implementation
+function keccak256(input) {
+  // Using SubtleCrypto is async and doesn't support keccak.
+  // We'll use a minimal JS keccak256.
+  return keccak256Impl(input instanceof Uint8Array ? input : new TextEncoder().encode(input));
+}
+
+// Keccak-256 (minimal implementation)
+function keccak256Impl(message) {
+  const RC = [
+    0x0000000000000001n, 0x0000000000008082n, 0x800000000000808An, 0x8000000080008000n,
+    0x000000000000808Bn, 0x0000000080000001n, 0x8000000080008081n, 0x8000000000008009n,
+    0x000000000000008An, 0x0000000000000088n, 0x0000000080008009n, 0x000000008000000An,
+    0x000000008000808Bn, 0x800000000000008Bn, 0x8000000000008089n, 0x8000000000008003n,
+    0x8000000000008002n, 0x8000000000000080n, 0x000000000000800An, 0x800000008000000An,
+    0x8000000080008081n, 0x8000000000008080n, 0x0000000080000001n, 0x8000000080008008n,
+  ];
+  const ROTC = [
+    1,3,6,10,15,21,28,36,45,55,2,14,27,41,56,8,25,43,62,18,39,61,20,44
+  ];
+  const PI = [
+    10,7,11,17,18,3,5,16,8,21,24,4,15,23,19,13,12,2,20,14,22,9,6,1
+  ];
+
+  const rate = 136;
+  const capacity = 64;
+
+  // Pad message
+  const msgLen = message.length;
+  const blockSize = rate;
+  const padLen = blockSize - (msgLen % blockSize);
+  const padded = new Uint8Array(msgLen + padLen);
+  padded.set(message);
+  padded[msgLen] = 0x01;
+  padded[padded.length - 1] |= 0x80;
+
+  // State
+  const state = new Array(25).fill(0n);
+
+  // Absorb
+  for (let offset = 0; offset < padded.length; offset += blockSize) {
+    for (let i = 0; i < blockSize / 8; i++) {
+      const idx = offset + i * 8;
+      let lane = 0n;
+      for (let b = 0; b < 8; b++) {
+        lane |= BigInt(padded[idx + b]) << BigInt(b * 8);
+      }
+      state[i] ^= lane;
+    }
+    keccakF(state, RC, ROTC, PI);
+  }
+
+  // Squeeze (256 bits = 32 bytes = 4 lanes)
+  let hash = '';
+  for (let i = 0; i < 4; i++) {
+    for (let b = 0; b < 8; b++) {
+      hash += ((state[i] >> BigInt(b * 8)) & 0xFFn).toString(16).padStart(2, '0');
+    }
+  }
+  return hash;
+
+  function keccakF(state, RC, ROTC, PI) {
+    for (let round = 0; round < 24; round++) {
+      // θ
+      const C = new Array(5);
+      for (let x = 0; x < 5; x++) {
+        C[x] = state[x] ^ state[x + 5] ^ state[x + 10] ^ state[x + 15] ^ state[x + 20];
+      }
+      for (let x = 0; x < 5; x++) {
+        const D = C[(x + 4) % 5] ^ rot64(C[(x + 1) % 5], 1n);
+        for (let y = 0; y < 25; y += 5) {
+          state[y + x] ^= D;
+        }
+      }
+      // ρ and π
+      let last = state[1];
+      for (let i = 0; i < 24; i++) {
+        const j = PI[i];
+        const temp = state[j];
+        state[j] = rot64(last, BigInt(ROTC[i]));
+        last = temp;
+      }
+      // χ
+      for (let y = 0; y < 25; y += 5) {
+        const t = [state[y], state[y+1], state[y+2], state[y+3], state[y+4]];
+        for (let x = 0; x < 5; x++) {
+          state[y + x] = t[x] ^ ((~t[(x+1)%5]) & t[(x+2)%5]);
+        }
+      }
+      // ι
+      state[0] ^= RC[round];
+    }
+  }
+
+  function rot64(x, n) {
+    x = BigInt.asUintN(64, x);
+    n = BigInt.asUintN(64, n);
+    return BigInt.asUintN(64, (x << n) | (x >> (64n - n)));
+  }
+}
+
+// Pre-computed selectors
+const SEL = {
+  slot0: '3850c7bd',
+  positions: '99fbab88',
+  feeGrowthGlobal0X128: 'f3058399',
+  feeGrowthGlobal1X128: '46141319',
+  ticks: 'f30dba93',
+  balanceOf: '70a08231',
+  tokenOfOwnerByIndex: '2f745c59',
+  factory: 'c45a0155',
+  getPool: '1698ee82',
+};
+
+function getRpcUrl() {
+  return CONFIG.rpcUrls[CONFIG.rpcIndex % CONFIG.rpcUrls.length];
+}
+
+function rotateRpc() {
+  CONFIG.rpcIndex = (CONFIG.rpcIndex + 1) % CONFIG.rpcUrls.length;
+  console.log('Switched RPC to:', getRpcUrl());
+}
+
+async function rpcCall(to, data, retries = 2) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const resp = await fetch(getRpcUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'eth_call',
+          params: [{ to, data }, 'latest'],
+          id: 1,
+        }),
+      });
+      const json = await resp.json();
+      if (json.error) {
+        if (json.error.message?.includes('rate limit') || json.error.code === 429) {
+          rotateRpc();
+          continue;
+        }
+        throw new Error(json.error.message);
+      }
+      return json.result;
+    } catch (err) {
+      if (i < retries && (err.message?.includes('rate') || err.message?.includes('429') || err.message?.includes('fetch'))) {
+        rotateRpc();
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+function decodeUint(hex, offset) {
+  return BigInt('0x' + hex.slice(2 + offset * 64, 2 + (offset + 1) * 64));
+}
+
+function decodeInt(hex, offset) {
+  const val = decodeUint(hex, offset);
+  if (val >= (1n << 255n)) return val - (1n << 256n);
+  return val;
+}
+
+// ============================================================
+// On-chain data fetching
+// ============================================================
+async function fetchPoolSlot0(poolAddress) {
+  const result = await rpcCall(poolAddress, '0x' + SEL.slot0);
+  return {
+    sqrtPriceX96: decodeUint(result, 0),
+    tick: Number(decodeInt(result, 1)),
+  };
+}
+
+async function fetchSinglePosition(tokenId) {
+  const tokenIdHex = tokenId.toString(16).padStart(64, '0');
+  const data = '0x' + SEL.positions + tokenIdHex;
+  const result = await rpcCall(CONFIG.nftManager, data);
+  const liquidity = decodeUint(result, 7);
+  // Skip positions with 0 liquidity (closed)
+  if (liquidity === 0n) return null;
+  const token0 = '0x' + decodeUint(result, 2).toString(16).padStart(40, '0');
+  const token1 = '0x' + decodeUint(result, 3).toString(16).padStart(40, '0');
+  const fee = Number(decodeUint(result, 4));
+  return {
+    tokenId,
+    token0,
+    token1,
+    fee,
+    tickLower: Number(decodeInt(result, 5)),
+    tickUpper: Number(decodeInt(result, 6)),
+    liquidity,
+    feeGrowthInside0LastX128: decodeUint(result, 8),
+    feeGrowthInside1LastX128: decodeUint(result, 9),
+    tokensOwed0: decodeUint(result, 10),
+    tokensOwed1: decodeUint(result, 11),
+    // Derived labels
+    token0Symbol: CONFIG.tokenSymbols[token0.toLowerCase()] || token0.slice(0,6),
+    token1Symbol: CONFIG.tokenSymbols[token1.toLowerCase()] || token1.slice(0,6),
+    token0Decimals: CONFIG.tokenDecimals[token0.toLowerCase()] || 18,
+    token1Decimals: CONFIG.tokenDecimals[token1.toLowerCase()] || 18,
+    feeLabel: CONFIG.feeTierLabel[fee] || fee + '',
+  };
+}
+
+async function discoverAllPositions() {
+  // Get NFT count for Sickle wallet
+  const addrHex = CONFIG.sickleAddress.slice(2).toLowerCase().padStart(64, '0');
+  const balResult = await rpcCall(CONFIG.nftManager, '0x' + SEL.balanceOf + addrHex);
+  const count = Number(decodeUint(balResult, 0));
+  console.log(`Found ${count} NFT(s) on Sickle wallet`);
+
+  if (count === 0) return [];
+
+  // Get all token IDs
+  const tokenIds = [];
+  for (let i = 0; i < count; i++) {
+    const idxHex = BigInt(i).toString(16).padStart(64, '0');
+    const result = await rpcCall(CONFIG.nftManager, '0x' + SEL.tokenOfOwnerByIndex + addrHex + idxHex);
+    tokenIds.push(decodeUint(result, 0));
+  }
+
+  // Fetch all positions in parallel
+  const positions = await Promise.all(tokenIds.map(id => fetchSinglePosition(id)));
+  return positions.filter(p => p !== null);
+}
+
+// Uniswap V3 Factory on Base
+const UNI_V3_FACTORY = '0x33128a8fC17869897dcE68Ed026d694621f6FDfD';
+
+async function getPoolAddress(token0, token1, fee) {
+  // Sort tokens
+  const [t0, t1] = BigInt(token0) < BigInt(token1) ? [token0, token1] : [token1, token0];
+  const data = '0x' + SEL.getPool
+    + t0.slice(2).toLowerCase().padStart(64, '0')
+    + t1.slice(2).toLowerCase().padStart(64, '0')
+    + BigInt(fee).toString(16).padStart(64, '0');
+  const result = await rpcCall(UNI_V3_FACTORY, data);
+  return '0x' + decodeUint(result, 0).toString(16).padStart(40, '0');
+}
+
+// Cache mint timestamps (they never change)
+const mintTimestampCache = {};
+
+async function fetchMintTimestamp(tokenId) {
+  const key = tokenId.toString();
+  if (mintTimestampCache[key]) return mintTimestampCache[key];
+
+  // Use BaseScan API (free, no key needed for basic calls)
+  try {
+    const nftAddr = CONFIG.nftManager.toLowerCase();
+    const tokenIdHex = '0x' + tokenId.toString(16);
+    // Get transfer events for this NFT via BaseScan
+    const url = `https://api.basescan.org/api?module=account&action=tokennfttx&contractaddress=${nftAddr}&address=${CONFIG.sickleAddress}&startblock=0&endblock=99999999&sort=asc`;
+    const resp = await fetch(url);
+    const json = await resp.json();
+
+    if (json.status === '1' && json.result) {
+      // Find the mint (from = 0x0) for our tokenId
+      const mint = json.result.find(tx =>
+        tx.tokenID === tokenId.toString() &&
+        tx.from === '0x0000000000000000000000000000000000000000'
+      );
+      if (mint) {
+        const ts = Number(mint.timeStamp);
+        mintTimestampCache[key] = ts;
+        console.log(`Mint timestamp for NFT #${key}: ${new Date(ts * 1000).toISOString()}`);
+        return ts;
+      }
+    }
+  } catch (e) {
+    console.warn('BaseScan API failed:', e);
+  }
+
+  // Fallback: try RPC eth_getLogs with recent block range (~30 days)
+  try {
+    // Get current block
+    const blockResp = await fetch(getRpcUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1 }),
+    });
+    const blockJson = await blockResp.json();
+    const currentBlock = BigInt(blockJson.result);
+    const fromBlock = '0x' + (currentBlock - 1300000n).toString(16); // ~30 days on Base (2s blocks)
+
+    const transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+    const zeroTopic = '0x' + '0'.repeat(64);
+    const tokenIdTopic = '0x' + tokenId.toString(16).padStart(64, '0');
+
+    const logResp = await fetch(getRpcUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'eth_getLogs',
+        params: [{ address: CONFIG.nftManager, topics: [transferTopic, zeroTopic, null, tokenIdTopic], fromBlock, toBlock: 'latest' }],
+        id: 1,
+      }),
+    });
+    const logJson = await logResp.json();
+    if (!logJson.error && logJson.result && logJson.result.length > 0) {
+      const mintBlock = logJson.result[0].blockNumber;
+      const blkResp = await fetch(getRpcUrl(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_getBlockByNumber', params: [mintBlock, false], id: 1 }),
+      });
+      const blkJson = await blkResp.json();
+      if (blkJson.result) {
+        const ts = Number(BigInt(blkJson.result.timestamp));
+        mintTimestampCache[key] = ts;
+        return ts;
+      }
+    }
+  } catch (e) {
+    console.warn('RPC getLogs failed:', e);
+  }
+
+  // Last resort: known mint timestamps
+  const knownMints = {
+    '5017208': 1776974765, // 2026-04-23 20:06:05 UTC
+  };
+  if (knownMints[key]) {
+    mintTimestampCache[key] = knownMints[key];
+    return knownMints[key];
+  }
+
+  return null;
+}
+
+// Fetch all Collect events for a position (= total harvested fees, on-chain history)
+// Collect(uint256 indexed tokenId, address recipient, uint128 amount0, uint128 amount1)
+const harvestedCache = {};
+let harvestedCacheTs = 0;
+
+async function fetchHarvestedFees(tokenId, dec0, dec1) {
+  const key = tokenId.toString();
+  // Cache 5 min
+  if (harvestedCache[key] && Date.now() - harvestedCacheTs < 300000) return harvestedCache[key];
+
+  try {
+    // Collect event topic: keccak256("Collect(uint256,address,uint128,uint128)")
+    const collectTopic = '0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01';
+    const tokenIdTopic = '0x' + tokenId.toString(16).padStart(64, '0');
+
+    // Try BaseScan API first (more reliable for historical logs)
+    const url = `https://api.basescan.org/api?module=logs&action=getLogs&address=${CONFIG.nftManager}&topic0=${collectTopic}&topic1=${tokenIdTopic}&fromBlock=0&toBlock=latest&sort=asc`;
+    const resp = await fetch(url);
+    const json = await resp.json();
+
+    let total0 = 0, total1 = 0;
+
+    if (json.status === '1' && json.result) {
+      for (const log of json.result) {
+        // data contains: recipient (address, 32 bytes), amount0 (uint128), amount1 (uint128)
+        // But Collect event has: tokenId (indexed), recipient (not indexed), amount0, amount1
+        // So data = recipient (32) + amount0 (32) + amount1 (32)
+        const data = log.data;
+        const a0 = BigInt('0x' + data.slice(66, 130));
+        const a1 = BigInt('0x' + data.slice(130, 194));
+        total0 += Number(a0) / Math.pow(10, dec0);
+        total1 += Number(a1) / Math.pow(10, dec1);
+      }
+    }
+
+    const result = { fees0: total0, fees1: total1 };
+    harvestedCache[key] = result;
+    harvestedCacheTs = Date.now();
+    console.log(`Harvested fees for NFT #${key}:`, total0.toFixed(6), 'token0,', total1.toFixed(10), 'token1');
+    return result;
+  } catch (e) {
+    console.warn('fetchHarvestedFees failed:', e);
+    return { fees0: 0, fees1: 0 };
+  }
+}
+
+// Known initial deposit values (USD) per NFT tokenId
+const KNOWN_DEPOSITS = {
+  '5017208': 2000,
+};
+
+// ========== CAPITAL FLOW LEDGER ==========
+// UPDATE THIS at each move:
+//   - New deposit:  add { date, amount, type: 'in' }
+//   - Withdraw:     add { date, amount, type: 'out' }
+//   - Re-range:     add OUT (amount received) + IN (amount re-deposited)
+//   - Close:        add OUT (amount received)
+// Amount = USD value at time of transaction
+// Also update KNOWN_DEPOSITS below with new NFT tokenId + deposit USD value
+// Balance = current position value + total fees + total OUT - total IN
+// Example re-range:
+//   { date: '2026-05-10', amount: 2050, type: 'out' },  // closed old position
+//   { date: '2026-05-10', amount: 2050, type: 'in' },   // opened new position
+const CAPITAL_FLOWS = [
+  { date: '2026-04-23', amount: 2000, type: 'in' },  // initial deposit
+];
+
+// Total external money invested (update when adding fresh capital, NOT on re-range)
+const INITIAL_INVESTMENT = 2000;
+// Timestamp of first deposit (for global APY)
+const FIRST_DEPOSIT_TS = 1776974765; // 2026-04-23 20:06:05 UTC
+// BTC price at first deposit (for Full BTC comparison)
+const FIRST_BTC_PRICE_CACHE = {};
+
+// Fetch BTC price at a specific timestamp via CoinGecko
+const entryPriceCache = {};
+
+async function fetchBtcPriceAtTime(timestamp) {
+  const key = timestamp.toString();
+  if (entryPriceCache[key]) return entryPriceCache[key];
+
+  try {
+    // CoinGecko market_chart/range — returns price data points
+    const from = timestamp - 300; // 5 min before
+    const to = timestamp + 300;   // 5 min after
+    const resp = await fetch(`https://api.coingecko.com/api/v3/coins/bitcoin/market_chart/range?vs_currency=usd&from=${from}&to=${to}`);
+    const json = await resp.json();
+    if (json.prices && json.prices.length > 0) {
+      // Take closest data point
+      const price = json.prices[0][1];
+      entryPriceCache[key] = price;
+      console.log('BTC entry price:', price);
+      return price;
+    }
+  } catch (e) {
+    console.warn('CoinGecko historical price failed:', e);
+  }
+  return null;
+}
+
+function encodeInt24(tick) {
+  // ABI encode int24 as int256 (left-padded, two's complement for negatives)
+  if (tick >= 0) return BigInt(tick).toString(16).padStart(64, '0');
+  return (BigInt(2)**BigInt(256) + BigInt(tick)).toString(16).padStart(64, '0');
+}
+
+async function fetchTickData(tick, poolAddr) {
+  const data = '0x' + SEL.ticks + encodeInt24(tick);
+  const result = await rpcCall(poolAddr, data);
+  return {
+    feeGrowthOutside0X128: decodeUint(result, 2),
+    feeGrowthOutside1X128: decodeUint(result, 3),
+  };
+}
+
+async function fetchFeeGrowthGlobals(poolAddr) {
+  const [r0, r1] = await Promise.all([
+    rpcCall(poolAddr, '0x' + SEL.feeGrowthGlobal0X128),
+    rpcCall(poolAddr, '0x' + SEL.feeGrowthGlobal1X128),
+  ]);
+  return {
+    feeGrowthGlobal0X128: decodeUint(r0, 0),
+    feeGrowthGlobal1X128: decodeUint(r1, 0),
+  };
+}
+
+const Q128 = 2n ** 128n;
+const MAX_UINT256 = 2n ** 256n;
+
+// Modular subtraction (handles underflow wrapping)
+function subMod(a, b) {
+  return ((a - b) + MAX_UINT256) % MAX_UINT256;
+}
+
+function computeUnclaimedFees(position, feeGlobals, tickLowerData, tickUpperData, currentTick, dec0, dec1) {
+  const { feeGrowthGlobal0X128, feeGrowthGlobal1X128 } = feeGlobals;
+
+  // feeGrowthBelow
+  let feeGrowthBelow0, feeGrowthBelow1;
+  if (currentTick >= position.tickLower) {
+    feeGrowthBelow0 = tickLowerData.feeGrowthOutside0X128;
+    feeGrowthBelow1 = tickLowerData.feeGrowthOutside1X128;
+  } else {
+    feeGrowthBelow0 = subMod(feeGrowthGlobal0X128, tickLowerData.feeGrowthOutside0X128);
+    feeGrowthBelow1 = subMod(feeGrowthGlobal1X128, tickLowerData.feeGrowthOutside1X128);
+  }
+
+  // feeGrowthAbove
+  let feeGrowthAbove0, feeGrowthAbove1;
+  if (currentTick < position.tickUpper) {
+    feeGrowthAbove0 = tickUpperData.feeGrowthOutside0X128;
+    feeGrowthAbove1 = tickUpperData.feeGrowthOutside1X128;
+  } else {
+    feeGrowthAbove0 = subMod(feeGrowthGlobal0X128, tickUpperData.feeGrowthOutside0X128);
+    feeGrowthAbove1 = subMod(feeGrowthGlobal1X128, tickUpperData.feeGrowthOutside1X128);
+  }
+
+  // feeGrowthInside
+  const feeGrowthInside0 = subMod(subMod(feeGrowthGlobal0X128, feeGrowthBelow0), feeGrowthAbove0);
+  const feeGrowthInside1 = subMod(subMod(feeGrowthGlobal1X128, feeGrowthBelow1), feeGrowthAbove1);
+
+  // Unclaimed = (feeGrowthInside - feeGrowthInsideLast) * liquidity / 2^128
+  const unclaimed0 = subMod(feeGrowthInside0, position.feeGrowthInside0LastX128) * position.liquidity / Q128;
+  const unclaimed1 = subMod(feeGrowthInside1, position.feeGrowthInside1LastX128) * position.liquidity / Q128;
+
+  // Add tokensOwed (previously snapshotted but not yet collected)
+  const total0 = unclaimed0 + position.tokensOwed0;
+  const total1 = unclaimed1 + position.tokensOwed1;
+
+  return {
+    fees0: Number(total0) / Math.pow(10, dec0),
+    fees1: Number(total1) / Math.pow(10, dec1),
+  };
+}
+
+// DeFi Llama pool lookup cache
+const llamaPoolsCache = { data: null, ts: 0 };
+
+async function fetchLlamaPoolData(token0Symbol, token1Symbol, fee) {
+  try {
+    // Cache 10 min
+    if (!llamaPoolsCache.data || Date.now() - llamaPoolsCache.ts > 600000) {
+      const resp = await fetch('https://yields.llama.fi/pools');
+      const json = await resp.json();
+      llamaPoolsCache.data = json.data;
+      llamaPoolsCache.ts = Date.now();
+    }
+    // Find matching pool
+    const symbols = [token0Symbol, token1Symbol].sort();
+    const feeMap = { 100: 'v3', 500: 'v3', 3000: 'v3', 10000: 'v3' };
+    const pool = llamaPoolsCache.data.find(p =>
+      p.chain === 'Base' &&
+      p.project === 'uniswap-v3' &&
+      p.symbol &&
+      symbols.every(s => p.symbol.toUpperCase().includes(s.toUpperCase()))
+    );
+    if (!pool) return null;
+    return { apy: pool.apy, tvlUsd: pool.tvlUsd, poolId: pool.pool };
+  } catch {
+    return null;
+  }
+}
+
+let cachedEurRate = null;
+let eurRateLastFetch = 0;
+
+async function fetchEurRate() {
+  // Cache 5 min
+  if (cachedEurRate && Date.now() - eurRateLastFetch < 300000) return cachedEurRate;
+  try {
+    const resp = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=usd-coin&vs_currencies=eur');
+    const json = await resp.json();
+    cachedEurRate = json['usd-coin']?.eur || 0.92;
+    eurRateLastFetch = Date.now();
+    return cachedEurRate;
+  } catch {
+    return cachedEurRate || 0.92; // fallback
+  }
+}
+
+// ============================================================
+// Math helpers
+// ============================================================
+function tickToPrice(tick, dec0, dec1) {
+  const raw = Math.pow(1.0001, tick);
+  const adjusted = raw * Math.pow(10, dec0 - dec1);
+  return 1 / adjusted;
+}
+
+function sqrtPriceToPrice(sqrtPriceX96, dec0, dec1) {
+  const sqrtPrice = Number(sqrtPriceX96) / (2 ** 96);
+  const price = sqrtPrice * sqrtPrice;
+  const adjusted = price * Math.pow(10, dec0 - dec1);
+  return 1 / adjusted;
+}
+
+function getTokenAmounts(liquidity, sqrtPriceX96, tickLower, tickUpper, dec0, dec1) {
+  const sqrtA = Math.pow(1.0001, tickLower / 2);
+  const sqrtB = Math.pow(1.0001, tickUpper / 2);
+  const sqrtP = Number(sqrtPriceX96) / (2 ** 96);
+  const liq = Number(liquidity);
+
+  let amount0 = 0, amount1 = 0;
+  if (sqrtP <= sqrtA) {
+    amount0 = liq * (1/sqrtA - 1/sqrtB);
+  } else if (sqrtP >= sqrtB) {
+    amount1 = liq * (sqrtB - sqrtA);
+  } else {
+    amount0 = liq * (1/sqrtP - 1/sqrtB);
+    amount1 = liq * (sqrtP - sqrtA);
+  }
+
+  return {
+    amount0: amount0 / Math.pow(10, dec0),
+    amount1: amount1 / Math.pow(10, dec1),
+  };
+}
+
+// ============================================================
+// Render single position card
+// ============================================================
+function renderPositionCard(pos, poolData, feesData, eurRate, llamaData, mintTimestamp, btcEntryPrice) {
+  const d0 = pos.token0Decimals, d1 = pos.token1Decimals;
+  const currentPrice = sqrtPriceToPrice(poolData.sqrtPriceX96, d0, d1);
+  const priceA = tickToPrice(pos.tickLower, d0, d1);
+  const priceB = tickToPrice(pos.tickUpper, d0, d1);
+  const lowerPrice = Math.min(priceA, priceB);
+  const upperPrice = Math.max(priceA, priceB);
+
+  const inRange = poolData.tick >= pos.tickLower && poolData.tick < pos.tickUpper;
+  const distToLower = ((currentPrice - lowerPrice) / currentPrice) * 100;
+  const distToUpper = ((upperPrice - currentPrice) / currentPrice) * 100;
+  const nearEdge = inRange && Math.min(distToLower, distToUpper) < 2;
+
+  const amounts = getTokenAmounts(pos.liquidity, poolData.sqrtPriceX96, pos.tickLower, pos.tickUpper, d0, d1);
+  const totalValueUSD = amounts.amount0 + (amounts.amount1 * currentPrice);
+
+  const uncollected0 = feesData ? feesData.fees0 : 0;
+  const uncollected1 = feesData ? feesData.fees1 : 0;
+  const uncollectedUSD = uncollected0 + (uncollected1 * currentPrice);
+
+  // Total fees = on-chain harvested (from Collect events) + current uncollected
+  const harvested = pos._harvestedFees || { fees0: 0, fees1: 0 };
+  const totalFees0 = harvested.fees0 + uncollected0;
+  const totalFees1 = harvested.fees1 + uncollected1;
+  const totalFeesUSD = totalFees0 + (totalFees1 * currentPrice);
+  const totalFeesEUR = totalFeesUSD * eurRate;
+
+  // Personal APY: fees-only, annualized
+  const nowSec = Math.floor(Date.now() / 1000);
+  const elapsed = mintTimestamp ? (nowSec - mintTimestamp) : 0;
+  const elapsedDays = elapsed / 86400;
+  const depositValue = KNOWN_DEPOSITS[pos.tokenId.toString()] || null;
+  const myApy = (elapsed > 300 && depositValue > 0) ? (totalFeesUSD / depositValue) * (365 * 86400 / elapsed) * 100 : 0;
+  const pnl = depositValue ? (totalValueUSD + totalFeesUSD - depositValue) : null;
+
+  // HODL BTC comparison
+  const hodlBtcAmount = (depositValue && btcEntryPrice) ? depositValue / btcEntryPrice : null;
+  const hodlBtcValueNow = (hodlBtcAmount && currentPrice) ? hodlBtcAmount * currentPrice : null;
+  const hodlPnl = (hodlBtcValueNow && depositValue) ? hodlBtcValueNow - depositValue : null;
+  const lpVsHodl = (pnl !== null && hodlPnl !== null) ? pnl - hodlPnl : null;
+
+  console.log('Fees debug:', { harvested0: harvested.fees0, harvested1: harvested.fees1, uncollected0, uncollected1, totalFeesUSD: totalFeesUSD.toFixed(4), myApy: myApy.toFixed(2) });
+  console.log('HODL debug:', { btcEntryPrice, currentPrice: currentPrice.toFixed(0), hodlBtcAmount: hodlBtcAmount?.toFixed(6), hodlBtcValueNow: hodlBtcValueNow?.toFixed(2), hodlPnl: hodlPnl?.toFixed(2), lpVsHodl: lpVsHodl?.toFixed(2) });
+
+  const rangePadding = (upperPrice - lowerPrice) * 0.15;
+  const displayMin = lowerPrice - rangePadding;
+  const displayMax = upperPrice + rangePadding;
+  const barLeft = ((lowerPrice - displayMin) / (displayMax - displayMin)) * 100;
+  const barRight = ((upperPrice - displayMin) / (displayMax - displayMin)) * 100;
+  const cursorPos = ((currentPrice - displayMin) / (displayMax - displayMin)) * 100;
+
+  let statusClass = 'in-range', statusText = 'IN RANGE', dotClass = 'live';
+  if (!inRange) { statusClass = 'out-of-range'; statusText = 'OUT OF RANGE'; dotClass = 'danger'; }
+  else if (nearEdge) { statusClass = 'near-edge'; statusText = 'NEAR EDGE'; dotClass = 'warning'; }
+
+  const distColor = d => d < 2 ? 'var(--red)' : d < 5 ? 'var(--orange)' : 'var(--green)';
+  const distWidth = d => Math.min(100, d * 5);
+
+  // Determine "big" token label (the one priced in the other)
+  // token1 price in token0 terms
+  const pricedToken = pos.token1Symbol;
+
+  return { totalValueUSD, feesUSD: totalFeesUSD, feesEUR: totalFeesEUR, currentPrice, _uncollected0: uncollected0, _uncollected1: uncollected1, html: `
+    <div class="header">
+      <div class="header-left">
+        <span class="pool-name">${pos.token0Symbol} / ${pos.token1Symbol}</span>
+        <span class="chain-badge">BASE</span>
+        <span class="fee-badge">${pos.feeLabel}</span>
+      </div>
+      <div class="refresh-info">
+        <span class="status-dot ${dotClass}"></span>
+      </div>
+    </div>
+
+    <div class="status-banner ${statusClass}">${statusText}</div>
+
+    <div class="range-section">
+      <div class="range-label">Price Range (${pricedToken})</div>
+      <div class="range-bar-container">
+        <div class="range-bar-fill" style="left: ${barLeft}%; width: ${barRight - barLeft}%;"></div>
+        <div class="range-bar-cursor" style="left: ${Math.max(1, Math.min(99, cursorPos))}%;"></div>
+      </div>
+      <div class="range-prices">
+        <span>$${formatNum(lowerPrice, 0)}</span>
+        <span class="current">$${formatNum(currentPrice, 0)}</span>
+        <span>$${formatNum(upperPrice, 0)}</span>
+      </div>
+      <div style="margin-top: 12px;">
+        <div class="distance-bar">
+          <span style="font-size: 10px; color: var(--text-dim); min-width: 60px;">Lower</span>
+          <div class="bar"><div class="bar-fill" style="width: ${distWidth(distToLower)}%; background: ${distColor(distToLower)};"></div></div>
+          <span class="pct" style="color: ${distColor(distToLower)};">${distToLower.toFixed(1)}%</span>
+        </div>
+        <div class="distance-bar" style="margin-top: 4px;">
+          <span style="font-size: 10px; color: var(--text-dim); min-width: 60px;">Upper</span>
+          <div class="bar"><div class="bar-fill" style="width: ${distWidth(distToUpper)}%; background: ${distColor(distToUpper)};"></div></div>
+          <span class="pct" style="color: ${distColor(distToUpper)};">${distToUpper.toFixed(1)}%</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi">
+        <span class="kpi-label">Position Value</span>
+        <span class="kpi-value">$${formatNum(totalValueUSD, 2)}</span>
+        <span class="kpi-sub">${formatNum(amounts.amount0, 2)} ${pos.token0Symbol} + ${formatNum(amounts.amount1, 6)} ${pos.token1Symbol}</span>
+      </div>
+      <div class="kpi">
+        <span class="kpi-label">Total Fees</span>
+        <span class="kpi-value positive">$${formatNum(totalFeesUSD, 2)}</span>
+        <span class="kpi-sub">${formatNum(totalFees0, 4)} ${pos.token0Symbol} + ${formatNum(totalFees1, 8)} ${pos.token1Symbol}</span>
+      </div>
+      <div class="kpi">
+        <span class="kpi-label">My APY</span>
+        <span class="kpi-value ${myApy >= 0 ? 'positive' : 'negative'}">${elapsed > 300 && depositValue ? formatNum(myApy, 1) + '%' : 'N/A'}</span>
+        <span class="kpi-sub">${elapsedDays >= 1 ? elapsedDays.toFixed(1) + 'd' : Math.floor(elapsed/3600) + 'h'} in${llamaData ? ' · pool: ' + formatNum(llamaData.apy, 1) + '%' : ''}</span>
+      </div>
+      <div class="kpi">
+        <span class="kpi-label">P&L LP</span>
+        <span class="kpi-value small ${pnl !== null ? (pnl >= 0 ? 'positive' : 'negative') : ''}">${pnl !== null ? (pnl >= 0 ? '+' : '') + '$' + formatNum(pnl, 2) : 'N/A'}</span>
+        <span class="kpi-sub">${pricedToken} $${formatNum(currentPrice, 0)}</span>
+      </div>
+      <div class="kpi">
+        <span class="kpi-label">Full BTC</span>
+        <span class="kpi-value small">${hodlBtcValueNow !== null ? '$' + formatNum(hodlBtcValueNow, 2) : 'N/A'}</span>
+        <span class="kpi-sub">${hodlBtcAmount ? formatNum(hodlBtcAmount, 6) + ' BTC @ $' + formatNum(btcEntryPrice, 0) : ''}</span>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>NFT #${pos.tokenId.toString()}${llamaData ? ' · TVL $' + formatNum(llamaData.tvlUsd / 1e6, 1) + 'M' : ''}</span>
+      <a href="https://basescan.org/address/${CONFIG.sickleAddress}" target="_blank">BaseScan ↗</a>
+    </div>
+  `};
+}
+
+function formatNum(n, decimals) {
+  if (n === null || n === undefined || isNaN(n)) return '—';
+  return Number(n).toLocaleString('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
+// ============================================================
+// Global historical fees — all Collect events from ALL positions ever held
+// ============================================================
+let globalHistoricalFees = null;
+let globalHistoricalFeesTTs = 0;
+
+async function fetchAllHistoricalFees() {
+  // Cache 5 min
+  if (globalHistoricalFees && Date.now() - globalHistoricalFeesTTs < 300000) return globalHistoricalFees;
+
+  try {
+    // Step 1: find ALL tokenIds ever transferred TO sickle
+    const transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+    const sickleTopicPadded = '0x' + CONFIG.sickleAddress.slice(2).toLowerCase().padStart(64, '0');
+
+    const resp = await fetch(`https://api.basescan.org/api?module=logs&action=getLogs&address=${CONFIG.nftManager}&topic0=${transferTopic}&topic2=${sickleTopicPadded}&fromBlock=0&toBlock=latest&sort=asc`);
+    const json = await resp.json();
+
+    const allTokenIds = new Set();
+    if (json.status === '1' && json.result) {
+      for (const log of json.result) {
+        allTokenIds.add(BigInt(log.topics[3]).toString());
+      }
+    }
+
+    console.log('Historical fees: scanning tokenIds:', [...allTokenIds]);
+
+    // Step 2: for each tokenId, get ALL Collect events
+    const collectTopic = '0x40d0efd1a53d60ecbf40971b9daf7dc90178c3aadc7aab1765632738fa8b8f01';
+    let totalCollected0 = 0, totalCollected1 = 0;
+    const dec0 = 6, dec1 = 8; // USDC / cbBTC
+
+    for (const tid of allTokenIds) {
+      const tokenIdTopic = '0x' + BigInt(tid).toString(16).padStart(64, '0');
+      const colResp = await fetch(`https://api.basescan.org/api?module=logs&action=getLogs&address=${CONFIG.nftManager}&topic0=${collectTopic}&topic1=${tokenIdTopic}&fromBlock=0&toBlock=latest&sort=asc`);
+      const colJson = await colResp.json();
+
+      if (colJson.status === '1' && colJson.result) {
+        for (const log of colJson.result) {
+          const d = log.data;
+          // data = recipient(address padded 32) + amount0(uint128 padded 32) + amount1(uint128 padded 32)
+          const a0 = Number(BigInt('0x' + d.slice(66, 130))) / Math.pow(10, dec0);
+          const a1 = Number(BigInt('0x' + d.slice(130, 194))) / Math.pow(10, dec1);
+          totalCollected0 += a0;
+          totalCollected1 += a1;
+        }
+      }
+    }
+
+    globalHistoricalFees = { collected0: totalCollected0, collected1: totalCollected1 };
+    globalHistoricalFeesTTs = Date.now();
+    console.log('Historical fees total:', globalHistoricalFees);
+    return globalHistoricalFees;
+  } catch (e) {
+    console.warn('fetchAllHistoricalFees failed:', e);
+    return globalHistoricalFees || { collected0: 0, collected1: 0 };
+  }
+}
+
+// ============================================================
+// Main loop
+// ============================================================
+async function update() {
+  try {
+    // Step 1: discover all positions + EUR rate
+    const [positions, eurRate] = await Promise.all([
+      discoverAllPositions(),
+      fetchEurRate(),
+    ]);
+
+    if (positions.length === 0) {
+      document.getElementById('widget').innerHTML = `
+        <div class="header"><div class="header-left"><span class="pool-name">DeFi Monitor</span><span class="chain-badge">BASE</span></div></div>
+        <div style="padding: 40px 20px; text-align: center; color: var(--text-dim);">No active positions found on Sickle wallet</div>
+      `;
+      return;
+    }
+
+    console.log(`Found ${positions.length} active position(s)`);
+
+    // Step 2: for each position, get pool data + fees + llama
+    let totalPortfolioUSD = 0;
+    let totalFeesEUR = 0;
+    const cards = [];
+
+    for (const pos of positions) {
+      // Get pool address
+      const poolAddr = await getPoolAddress(pos.token0, pos.token1, pos.fee);
+
+      // Fetch pool + fee data + mint timestamp + harvested fees in parallel
+      const [poolData, feeGlobals, tickLowerData, tickUpperData, llamaData, mintTs, harvested] = await Promise.all([
+        fetchPoolSlot0(poolAddr),
+        fetchFeeGrowthGlobals(poolAddr),
+        fetchTickData(pos.tickLower, poolAddr),
+        fetchTickData(pos.tickUpper, poolAddr),
+        fetchLlamaPoolData(pos.token0Symbol, pos.token1Symbol, pos.fee),
+        fetchMintTimestamp(pos.tokenId),
+        fetchHarvestedFees(pos.tokenId, pos.token0Decimals, pos.token1Decimals),
+      ]);
+
+      // Fetch BTC entry price (needs mintTs)
+      const btcEntry = mintTs ? await fetchBtcPriceAtTime(mintTs) : null;
+
+      pos._harvestedFees = harvested;
+      const feesData = computeUnclaimedFees(pos, feeGlobals, tickLowerData, tickUpperData, poolData.tick, pos.token0Decimals, pos.token1Decimals);
+      const card = renderPositionCard(pos, poolData, feesData, eurRate, llamaData, mintTs, btcEntry);
+      totalPortfolioUSD += card.totalValueUSD;
+      totalFeesEUR += card.feesEUR;
+      cards.push(card);
+    }
+
+    const now = new Date().toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+    // Global KPIs — historical fees from ALL positions (active + closed)
+    const historicalFees = await fetchAllHistoricalFees();
+    const currentBtcPrice = cards[0]?.currentPrice || 0;
+
+    // All-time fees = historical collected (from closed + compounded positions) + current uncollected from active positions
+    const activeUncollected0 = cards.reduce((s, c) => s + (c._uncollected0 || 0), 0);
+    const activeUncollected1 = cards.reduce((s, c) => s + (c._uncollected1 || 0), 0);
+    const globalTotalFeesUSD = (historicalFees.collected0 + activeUncollected0) + ((historicalFees.collected1 + activeUncollected1) * currentBtcPrice);
+    const globalTotalFeesEUR = globalTotalFeesUSD * eurRate;
+    // Capital flow balance
+    const totalIn = CAPITAL_FLOWS.filter(f => f.type === 'in').reduce((s, f) => s + f.amount, 0);
+    const totalOut = CAPITAL_FLOWS.filter(f => f.type === 'out').reduce((s, f) => s + f.amount, 0);
+    const balance = totalPortfolioUSD + totalOut + globalTotalFeesUSD - totalIn;
+
+    // Render
+    const widget = document.getElementById('widget');
+
+    const globalHeader = `
+      <div style="padding: 8px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border);">
+        <span style="font-size: 12px; font-weight: 700;">DeFi Monitor · ${CONFIG.sickleAddress.slice(0,6)}…${CONFIG.sickleAddress.slice(-4)}</span>
+        <span style="font-size: 10px; color: var(--text-dim);">${now}</span>
+      </div>
+
+      <div class="kpi-grid" style="background: rgba(63,185,80,0.03); border-bottom: 1px solid var(--border);">
+        <div class="kpi">
+          <span class="kpi-label">Position Value</span>
+          <span class="kpi-value">$${formatNum(totalPortfolioUSD, 2)}</span>
+          <span class="kpi-sub">invested $${formatNum(INITIAL_INVESTMENT, 0)}</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi-label">Total Fees</span>
+          <span class="kpi-value positive">$${formatNum(globalTotalFeesUSD, 2)}</span>
+        </div>
+        <div class="kpi">
+          <span class="kpi-label">Balance</span>
+          <span class="kpi-value ${balance >= 0 ? 'positive' : 'negative'}">${balance >= 0 ? '+' : ''}$${formatNum(balance, 2)}</span>
+          <span class="kpi-sub">in $${formatNum(totalIn, 0)} · out $${formatNum(totalOut, 0)}</span>
+        </div>
+      </div>
+    `;
+
+    widget.innerHTML = `
+      ${globalHeader}
+      <div style="padding: 6px 20px; background: var(--bg); border-bottom: 1px solid var(--border);">
+        <span style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px;">${positions.length} active position${positions.length > 1 ? 's' : ''}</span>
+      </div>
+      ${cards.map(c => c.html).join('<div style="border-top: 2px solid var(--border);"></div>')}
+    `;
+  } catch (err) {
+    console.error('Update error:', err);
+    document.getElementById('widget').innerHTML += `
+      <div class="error-msg">Error: ${err.message}<br>Retrying in ${CONFIG.refreshInterval/1000}s...</div>
+    `;
+  }
+}
+
+// Start
+update();
+setInterval(update, CONFIG.refreshInterval);
+</script>
+
+</body>
+</html>
