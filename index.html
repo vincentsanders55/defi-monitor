@@ -1052,18 +1052,6 @@ function renderPositionCard(pos, poolData, feesData, eurRate, llamaData, mintTim
         <span class="current">$${formatNum(currentPrice, 0)}</span>
         <span>$${formatNum(upperPrice, 0)}</span>
       </div>
-      <div style="margin-top: 12px;">
-        <div class="distance-bar">
-          <span style="font-size: 10px; color: var(--text-dim); min-width: 60px;">Lower</span>
-          <div class="bar"><div class="bar-fill" style="width: ${distWidth(distToLower)}%; background: ${distColor(distToLower)};"></div></div>
-          <span class="pct" style="color: ${distColor(distToLower)};">${distToLower.toFixed(1)}%</span>
-        </div>
-        <div class="distance-bar" style="margin-top: 4px;">
-          <span style="font-size: 10px; color: var(--text-dim); min-width: 60px;">Upper</span>
-          <div class="bar"><div class="bar-fill" style="width: ${distWidth(distToUpper)}%; background: ${distColor(distToUpper)};"></div></div>
-          <span class="pct" style="color: ${distColor(distToUpper)};">${distToUpper.toFixed(1)}%</span>
-        </div>
-      </div>
     </div>
 
     <div class="kpi-grid">
@@ -1269,6 +1257,7 @@ async function update() {
         <span style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px;">${positions.length} active position${positions.length > 1 ? 's' : ''}</span>
       </div>
       ${cards.map(c => c.html).join('<div style="border-top: 2px solid var(--border);"></div>')}
+      ${btcChartHtml}
     `;
   } catch (err) {
     console.error('Update error:', err);
@@ -1278,7 +1267,72 @@ async function update() {
   }
 }
 
+// BTC 5-day chart
+async function fetchBtc5dChart() {
+  try {
+    const res = await fetch('https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=5');
+    const data = await res.json();
+    return data.prices; // [[timestamp, price], ...]
+  } catch { return null; }
+}
+
+function renderBtcChart(prices) {
+  if (!prices || prices.length < 2) return '<div style="padding:20px;color:var(--text-dim);font-size:11px;">BTC chart unavailable</div>';
+  const vals = prices.map(p => p[1]);
+  const minP = Math.min(...vals);
+  const maxP = Math.max(...vals);
+  const first = vals[0];
+  const last = vals[vals.length - 1];
+  const change = ((last - first) / first) * 100;
+  const isUp = change >= 0;
+
+  const w = 600, h = 120, pad = 2;
+  const range = maxP - minP || 1;
+  const stepX = w / (vals.length - 1);
+
+  let path = '';
+  vals.forEach((v, i) => {
+    const x = i * stepX;
+    const y = h - pad - ((v - minP) / range) * (h - pad * 2);
+    path += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
+  });
+
+  // Area fill
+  const lastX = (vals.length - 1) * stepX;
+  const areaPath = path + ` L${lastX.toFixed(1)},${h} L0,${h} Z`;
+
+  const color = isUp ? '#3fb950' : '#f85149';
+  const colorFaint = isUp ? 'rgba(63,185,80,0.08)' : 'rgba(248,81,73,0.08)';
+
+  // Date labels
+  const firstDate = new Date(prices[0][0]);
+  const lastDate = new Date(prices[prices.length - 1][0]);
+  const fmtDate = d => d.toLocaleDateString('en', { month: 'short', day: 'numeric' });
+
+  return `
+    <div style="padding: 16px 20px; border-top: 1px solid var(--border);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <span style="font-size: 11px; font-weight: 600; color: var(--text);">BTC · 5 days</span>
+        <span style="font-size: 11px; color: ${color}; font-weight: 600;">$${formatNum(last, 0)} (${isUp ? '+' : ''}${change.toFixed(1)}%)</span>
+      </div>
+      <svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;" preserveAspectRatio="none">
+        <path d="${areaPath}" fill="${colorFaint}" />
+        <path d="${path}" fill="none" stroke="${color}" stroke-width="1.5" />
+      </svg>
+      <div style="display: flex; justify-content: space-between; margin-top: 4px;">
+        <span style="font-size: 9px; color: var(--text-dim);">${fmtDate(firstDate)}</span>
+        <span style="font-size: 9px; color: var(--text-dim);">$${formatNum(minP, 0)} — $${formatNum(maxP, 0)}</span>
+        <span style="font-size: 9px; color: var(--text-dim);">${fmtDate(lastDate)}</span>
+      </div>
+    </div>
+  `;
+}
+
 // Start
+let btcChartHtml = '';
+fetchBtc5dChart().then(prices => { btcChartHtml = renderBtcChart(prices); });
+setInterval(() => fetchBtc5dChart().then(prices => { btcChartHtml = renderBtcChart(prices); }), 300000); // refresh chart every 5min
+
 update();
 setInterval(update, CONFIG.refreshInterval);
 </script>
