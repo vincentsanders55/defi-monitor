@@ -1273,12 +1273,19 @@ let btcChartPeriod = 5;
 
 async function fetchBtcChart(days) {
   if (btcChartCache[days] && Date.now() - btcChartCache[days].ts < 300000) return btcChartCache[days].data;
-  try {
-    const res = await fetch(`https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=${days}`);
-    const data = await res.json();
-    btcChartCache[days] = { data: data.prices, ts: Date.now() };
-    return data.prices;
-  } catch { return null; }
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 2000));
+      const res = await fetch(`https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=${days}`);
+      if (res.status === 429) { continue; }
+      const data = await res.json();
+      if (data.prices) {
+        btcChartCache[days] = { data: data.prices, ts: Date.now() };
+        return data.prices;
+      }
+    } catch {}
+  }
+  return btcChartCache[days]?.data || null;
 }
 
 function renderBtcChart(prices, activeDays) {
@@ -1349,14 +1356,21 @@ async function updateBtcChart() {
   if (el) el.innerHTML = btcChartHtml;
 }
 
-function switchBtcPeriod(days) {
+async function switchBtcPeriod(days) {
   btcChartPeriod = days;
-  updateBtcChart();
+  const el = document.getElementById('btc-chart-container');
+  if (el && !btcChartCache[days]) el.innerHTML = '<div style="padding:20px;color:var(--text-dim);font-size:11px;">Loading...</div>';
+  await updateBtcChart();
 }
 
-// Start
+// Start — preload all periods with staggered delays to avoid rate limit
 let btcChartHtml = '';
-updateBtcChart();
+(async () => {
+  await fetchBtcChart(5);
+  updateBtcChart();
+  setTimeout(() => fetchBtcChart(30), 3000);
+  setTimeout(() => fetchBtcChart(90), 6000);
+})();
 setInterval(updateBtcChart, 300000);
 
 update();
