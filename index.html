@@ -761,7 +761,7 @@ async function fetchHarvestedFees(tokenId, dec0, dec1) {
 
 // Known initial deposit values (USD) per NFT tokenId
 const KNOWN_DEPOSITS = {
-  '5017208': 2000,
+  '5017208': 1994.54,  // 997.844102 USDC + 0.01281791 cbBTC @ $77,758.19
 };
 
 // ========== CAPITAL FLOW LEDGER ==========
@@ -777,7 +777,7 @@ const KNOWN_DEPOSITS = {
 //   { date: '2026-05-10', amount: 2050, type: 'out' },  // closed old position
 //   { date: '2026-05-10', amount: 2050, type: 'in' },   // opened new position
 const CAPITAL_FLOWS = [
-  { date: '2026-04-23', amount: 2000, type: 'in' },  // initial deposit
+  { date: '2026-04-23', amount: 1994.54, type: 'in' },  // 997.84 USDC + 0.01282 cbBTC @ $77,758
 ];
 
 // ========== HARVESTED FEES LEDGER ==========
@@ -791,7 +791,7 @@ const HARVESTED_FEES_LEDGER = [
 ];
 
 // Total external money invested (update when adding fresh capital, NOT on re-range)
-const INITIAL_INVESTMENT = 2000;
+const INITIAL_INVESTMENT = 1994.54;  // exact on-chain: 997.84 USDC + 0.01282 cbBTC @ $77,758
 // Timestamp of first deposit (for global APY)
 const FIRST_DEPOSIT_TS = 1776974765; // 2026-04-23 20:06:05 UTC
 // BTC price at first deposit (for Full BTC comparison)
