@@ -786,8 +786,8 @@ const CAPITAL_FLOWS = [
 //   - usdc = USDC amount, btc = cbBTC amount
 // This is the source of truth for total fees earned (BaseScan detection unreliable with Sickle)
 const HARVESTED_FEES_LEDGER = [
-  { date: '2026-05-04', usdc: 3.657349, btc: 0.00004712 },  // compound #1 (block 45432324)
-  { date: '2026-05-08', usdc: 3.781573, btc: 0.00004626 },  // compound #2 (block 45728414)
+  { date: '2026-05-04', usdc: 3.657349, btc: 0.00004712, tokenId: '5017208' },  // compound #1 (block 45432324)
+  { date: '2026-05-08', usdc: 3.781573, btc: 0.00004626, tokenId: '5017208' },  // compound #2 (block 45728414)
 ];
 
 // Total external money invested (update when adding fresh capital, NOT on re-range)
@@ -1007,10 +1007,13 @@ function renderPositionCard(pos, poolData, feesData, eurRate, llamaData, mintTim
   const uncollected1 = feesData ? feesData.fees1 : 0;
   const uncollectedUSD = uncollected0 + (uncollected1 * currentPrice);
 
-  // Total fees = on-chain harvested (from Collect events) + current uncollected
+  // Total fees = ledger (harvested/compounded for this position) + current uncollected
+  const posLedger = HARVESTED_FEES_LEDGER.filter(e => e.tokenId === pos.tokenId.toString());
+  const ledgerFees0 = posLedger.reduce((s, e) => s + (e.usdc || 0), 0);
+  const ledgerFees1 = posLedger.reduce((s, e) => s + (e.btc || 0), 0);
   const harvested = pos._harvestedFees || { fees0: 0, fees1: 0 };
-  const totalFees0 = harvested.fees0 + uncollected0;
-  const totalFees1 = harvested.fees1 + uncollected1;
+  const totalFees0 = Math.max(ledgerFees0, harvested.fees0) + uncollected0;
+  const totalFees1 = Math.max(ledgerFees1, harvested.fees1) + uncollected1;
   const totalFeesUSD = totalFees0 + (totalFees1 * currentPrice);
   const totalFeesEUR = totalFeesUSD * eurRate;
 
@@ -1084,11 +1087,6 @@ function renderPositionCard(pos, poolData, feesData, eurRate, llamaData, mintTim
         <span class="kpi-label">Total Fees</span>
         <span class="kpi-value positive">$${formatNum(totalFeesUSD, 2)}</span>
         <span class="kpi-sub">${formatNum(totalFees0, 4)} ${pos.token0Symbol} + ${formatNum(totalFees1, 8)} ${pos.token1Symbol}</span>
-      </div>
-      <div class="kpi">
-        <span class="kpi-label">Pool APY</span>
-        <span class="kpi-value">${llamaData ? formatNum(llamaData.apy, 1) + '%' : 'N/A'}</span>
-        <span class="kpi-sub">${elapsedDays >= 1 ? elapsedDays.toFixed(1) + 'd' : Math.floor(elapsed/3600) + 'h'} in</span>
       </div>
       <div class="kpi">
         <span class="kpi-label">P&L LP</span>
