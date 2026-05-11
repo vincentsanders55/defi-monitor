@@ -1253,7 +1253,9 @@ async function update() {
     // Capital flow balance
     const totalIn = CAPITAL_FLOWS.filter(f => f.type === 'in').reduce((s, f) => s + f.amount, 0);
     const totalOut = CAPITAL_FLOWS.filter(f => f.type === 'out').reduce((s, f) => s + f.amount, 0);
-    const balance = totalPortfolioUSD + totalOut + globalTotalFeesUSD - totalIn;
+    // Position value already includes compounded fees, only add uncollected
+    const uncollectedUSD = activeUncollected0 + (activeUncollected1 * currentBtcPrice);
+    const balance = totalPortfolioUSD + uncollectedUSD + totalOut - totalIn;
 
     // Render
     const widget = document.getElementById('widget');
