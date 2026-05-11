@@ -1217,19 +1217,25 @@ async function update() {
 
     const now = new Date().toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-    // Global KPIs — fees from ledger (compounds/harvests) + current uncollected
+    // Global KPIs — fees from best source (auto-detect OR ledger) + uncollected
     const currentBtcPrice = cards[0]?.currentPrice || 0;
+    const historicalFees = await fetchAllHistoricalFees();
 
-    // Ledger = manual source of truth for all harvested/compounded fees
+    // Ledger = manual fallback for when BaseScan fails
     const ledgerUsdc = HARVESTED_FEES_LEDGER.reduce((s, e) => s + (e.usdc || 0), 0);
     const ledgerBtc = HARVESTED_FEES_LEDGER.reduce((s, e) => s + (e.btc || 0), 0);
+
+    // Use whichever source is higher (auto-detect when BaseScan works, ledger as safety net)
+    const harvestedUsdc = Math.max(historicalFees.collected0, ledgerUsdc);
+    const harvestedBtc = Math.max(historicalFees.collected1, ledgerBtc);
 
     // Current uncollected from active positions
     const activeUncollected0 = cards.reduce((s, c) => s + (c._uncollected0 || 0), 0);
     const activeUncollected1 = cards.reduce((s, c) => s + (c._uncollected1 || 0), 0);
 
-    // Total fees = ledger (harvested/compounded) + uncollected
-    const globalTotalFeesUSD = (ledgerUsdc + activeUncollected0) + ((ledgerBtc + activeUncollected1) * currentBtcPrice);
+    // Total fees = harvested (best of auto/ledger) + uncollected
+    const globalTotalFeesUSD = (harvestedUsdc + activeUncollected0) + ((harvestedBtc + activeUncollected1) * currentBtcPrice);
+    console.log('Global fees:', { autoUsdc: historicalFees.collected0.toFixed(4), autoBtc: historicalFees.collected1.toFixed(8), ledgerUsdc, ledgerBtc, uncollected0: activeUncollected0.toFixed(4), uncollected1: activeUncollected1.toFixed(8), totalUSD: globalTotalFeesUSD.toFixed(2) });
     const globalTotalFeesEUR = globalTotalFeesUSD * eurRate;
 
     // Global APY
