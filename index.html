@@ -494,6 +494,13 @@ function rotateRpc() {
   console.log('Switched RPC to:', getRpcUrl());
 }
 
+async function safeFetchJson(url, opts) {
+  const resp = await fetch(url, opts);
+  const text = await resp.text();
+  try { return JSON.parse(text); }
+  catch { console.warn('Non-JSON response from', url.toString().slice(0, 80)); return null; }
+}
+
 async function rpcCall(to, data, retries = 2) {
   for (let i = 0; i <= retries; i++) {
     try {
@@ -627,8 +634,8 @@ async function fetchMintTimestamp(tokenId) {
     const tokenIdHex = '0x' + tokenId.toString(16);
     // Get transfer events for this NFT via BaseScan
     const url = `https://api.basescan.org/api?module=account&action=tokennfttx&contractaddress=${nftAddr}&address=${CONFIG.sickleAddress}&startblock=0&endblock=99999999&sort=asc`;
-    const resp = await fetch(url);
-    const json = await resp.json();
+    const json = await safeFetchJson(url);
+    if (!json) throw new Error('BaseScan returned non-JSON');
 
     if (json.status === '1' && json.result) {
       // Find the mint (from = 0x0) for our tokenId
@@ -721,16 +728,12 @@ async function fetchHarvestedFees(tokenId, dec0, dec1) {
 
     // Try BaseScan API first (more reliable for historical logs)
     const url = `https://api.basescan.org/api?module=logs&action=getLogs&address=${CONFIG.nftManager}&topic0=${collectTopic}&topic1=${tokenIdTopic}&fromBlock=0&toBlock=latest&sort=asc`;
-    const resp = await fetch(url);
-    const json = await resp.json();
+    const json = await safeFetchJson(url);
 
     let total0 = 0, total1 = 0;
 
-    if (json.status === '1' && json.result) {
+    if (json && json.status === '1' && json.result) {
       for (const log of json.result) {
-        // data contains: recipient (address, 32 bytes), amount0 (uint128), amount1 (uint128)
-        // But Collect event has: tokenId (indexed), recipient (not indexed), amount0, amount1
-        // So data = recipient (32) + amount0 (32) + amount1 (32)
         const data = log.data;
         const a0 = BigInt('0x' + data.slice(66, 130));
         const a1 = BigInt('0x' + data.slice(130, 194));
@@ -1120,11 +1123,10 @@ async function fetchAllHistoricalFees() {
     const transferTopic = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
     const sickleTopicPadded = '0x' + CONFIG.sickleAddress.slice(2).toLowerCase().padStart(64, '0');
 
-    const resp = await fetch(`https://api.basescan.org/api?module=logs&action=getLogs&address=${CONFIG.nftManager}&topic0=${transferTopic}&topic2=${sickleTopicPadded}&fromBlock=0&toBlock=latest&sort=asc`);
-    const json = await resp.json();
+    const json = await safeFetchJson(`https://api.basescan.org/api?module=logs&action=getLogs&address=${CONFIG.nftManager}&topic0=${transferTopic}&topic2=${sickleTopicPadded}&fromBlock=0&toBlock=latest&sort=asc`);
 
     const allTokenIds = new Set();
-    if (json.status === '1' && json.result) {
+    if (json && json.status === '1' && json.result) {
       for (const log of json.result) {
         allTokenIds.add(BigInt(log.topics[3]).toString());
       }
@@ -1139,10 +1141,9 @@ async function fetchAllHistoricalFees() {
 
     for (const tid of allTokenIds) {
       const tokenIdTopic = '0x' + BigInt(tid).toString(16).padStart(64, '0');
-      const colResp = await fetch(`https://api.basescan.org/api?module=logs&action=getLogs&address=${CONFIG.nftManager}&topic0=${collectTopic}&topic1=${tokenIdTopic}&fromBlock=0&toBlock=latest&sort=asc`);
-      const colJson = await colResp.json();
+      const colJson = await safeFetchJson(`https://api.basescan.org/api?module=logs&action=getLogs&address=${CONFIG.nftManager}&topic0=${collectTopic}&topic1=${tokenIdTopic}&fromBlock=0&toBlock=latest&sort=asc`);
 
-      if (colJson.status === '1' && colJson.result) {
+      if (colJson && colJson.status === '1' && colJson.result) {
         for (const log of colJson.result) {
           const d = log.data;
           // data = recipient(address padded 32) + amount0(uint128 padded 32) + amount1(uint128 padded 32)
