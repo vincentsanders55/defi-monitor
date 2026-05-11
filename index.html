@@ -771,6 +771,15 @@ const CAPITAL_FLOWS = [
   { date: '2026-04-23', amount: 2000, type: 'in' },  // initial deposit
 ];
 
+// ========== HARVESTED FEES LEDGER ==========
+// UPDATE THIS after each compound/harvest on vfat:
+//   - Note the fees displayed BEFORE compound, add entry here
+//   - usdc = USDC amount, btc = cbBTC amount
+// This is the source of truth for total fees earned (BaseScan detection unreliable with Sickle)
+const HARVESTED_FEES_LEDGER = [
+  // { date: '2026-05-01', usdc: 1.25, btc: 0.00001234 },
+];
+
 // Total external money invested (update when adding fresh capital, NOT on re-range)
 const INITIAL_INVESTMENT = 2000;
 // Timestamp of first deposit (for global APY)
@@ -992,12 +1001,10 @@ function renderPositionCard(pos, poolData, feesData, eurRate, llamaData, mintTim
   const totalFeesUSD = totalFees0 + (totalFees1 * currentPrice);
   const totalFeesEUR = totalFeesUSD * eurRate;
 
-  // Personal APY: fees-only, annualized
   const nowSec = Math.floor(Date.now() / 1000);
   const elapsed = mintTimestamp ? (nowSec - mintTimestamp) : 0;
   const elapsedDays = elapsed / 86400;
   const depositValue = KNOWN_DEPOSITS[pos.tokenId.toString()] || null;
-  const myApy = (elapsed > 300 && depositValue > 0) ? (totalFeesUSD / depositValue) * (365 * 86400 / elapsed) * 100 : 0;
   const pnl = depositValue ? (totalValueUSD + totalFeesUSD - depositValue) : null;
 
   // HODL BTC comparison
@@ -1006,7 +1013,7 @@ function renderPositionCard(pos, poolData, feesData, eurRate, llamaData, mintTim
   const hodlPnl = (hodlBtcValueNow && depositValue) ? hodlBtcValueNow - depositValue : null;
   const lpVsHodl = (pnl !== null && hodlPnl !== null) ? pnl - hodlPnl : null;
 
-  console.log('Fees debug:', { harvested0: harvested.fees0, harvested1: harvested.fees1, uncollected0, uncollected1, totalFeesUSD: totalFeesUSD.toFixed(4), myApy: myApy.toFixed(2) });
+  console.log('Fees debug:', { harvested0: harvested.fees0, harvested1: harvested.fees1, uncollected0, uncollected1, totalFeesUSD: totalFeesUSD.toFixed(4) });
   console.log('HODL debug:', { btcEntryPrice, currentPrice: currentPrice.toFixed(0), hodlBtcAmount: hodlBtcAmount?.toFixed(6), hodlBtcValueNow: hodlBtcValueNow?.toFixed(2), hodlPnl: hodlPnl?.toFixed(2), lpVsHodl: lpVsHodl?.toFixed(2) });
 
   const rangePadding = (upperPrice - lowerPrice) * 0.15;
@@ -1066,9 +1073,9 @@ function renderPositionCard(pos, poolData, feesData, eurRate, llamaData, mintTim
         <span class="kpi-sub">${formatNum(totalFees0, 4)} ${pos.token0Symbol} + ${formatNum(totalFees1, 8)} ${pos.token1Symbol}</span>
       </div>
       <div class="kpi">
-        <span class="kpi-label">My APY</span>
-        <span class="kpi-value ${myApy >= 0 ? 'positive' : 'negative'}">${elapsed > 300 && depositValue ? formatNum(myApy, 1) + '%' : 'N/A'}</span>
-        <span class="kpi-sub">${elapsedDays >= 1 ? elapsedDays.toFixed(1) + 'd' : Math.floor(elapsed/3600) + 'h'} in${llamaData ? ' · pool: ' + formatNum(llamaData.apy, 1) + '%' : ''}</span>
+        <span class="kpi-label">Pool APY</span>
+        <span class="kpi-value">${llamaData ? formatNum(llamaData.apy, 1) + '%' : 'N/A'}</span>
+        <span class="kpi-sub">${elapsedDays >= 1 ? elapsedDays.toFixed(1) + 'd' : Math.floor(elapsed/3600) + 'h'} in</span>
       </div>
       <div class="kpi">
         <span class="kpi-label">P&L LP</span>
@@ -1210,15 +1217,24 @@ async function update() {
 
     const now = new Date().toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-    // Global KPIs — historical fees from ALL positions (active + closed)
-    const historicalFees = await fetchAllHistoricalFees();
+    // Global KPIs — fees from ledger (compounds/harvests) + current uncollected
     const currentBtcPrice = cards[0]?.currentPrice || 0;
 
-    // All-time fees = historical collected (from closed + compounded positions) + current uncollected from active positions
+    // Ledger = manual source of truth for all harvested/compounded fees
+    const ledgerUsdc = HARVESTED_FEES_LEDGER.reduce((s, e) => s + (e.usdc || 0), 0);
+    const ledgerBtc = HARVESTED_FEES_LEDGER.reduce((s, e) => s + (e.btc || 0), 0);
+
+    // Current uncollected from active positions
     const activeUncollected0 = cards.reduce((s, c) => s + (c._uncollected0 || 0), 0);
     const activeUncollected1 = cards.reduce((s, c) => s + (c._uncollected1 || 0), 0);
-    const globalTotalFeesUSD = (historicalFees.collected0 + activeUncollected0) + ((historicalFees.collected1 + activeUncollected1) * currentBtcPrice);
+
+    // Total fees = ledger (harvested/compounded) + uncollected
+    const globalTotalFeesUSD = (ledgerUsdc + activeUncollected0) + ((ledgerBtc + activeUncollected1) * currentBtcPrice);
     const globalTotalFeesEUR = globalTotalFeesUSD * eurRate;
+
+    // Global APY
+    const globalElapsed = Math.floor(Date.now() / 1000) - FIRST_DEPOSIT_TS;
+    const globalAPY = (globalElapsed > 86400 && INITIAL_INVESTMENT > 0) ? (globalTotalFeesUSD / INITIAL_INVESTMENT) * (365 * 86400 / globalElapsed) * 100 : 0;
     // Capital flow balance
     const totalIn = CAPITAL_FLOWS.filter(f => f.type === 'in').reduce((s, f) => s + f.amount, 0);
     const totalOut = CAPITAL_FLOWS.filter(f => f.type === 'out').reduce((s, f) => s + f.amount, 0);
@@ -1242,6 +1258,7 @@ async function update() {
         <div class="kpi">
           <span class="kpi-label">Total Fees</span>
           <span class="kpi-value positive">$${formatNum(globalTotalFeesUSD, 2)}</span>
+          <span class="kpi-sub">APY ${formatNum(globalAPY, 1)}%</span>
         </div>
         <div class="kpi">
           <span class="kpi-label">Balance</span>
