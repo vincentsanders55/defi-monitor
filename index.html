@@ -494,11 +494,14 @@ function rotateRpc() {
   console.log('Switched RPC to:', getRpcUrl());
 }
 
-async function safeFetchJson(url, opts) {
-  const resp = await fetch(url, opts);
+async function safeJson(resp) {
   const text = await resp.text();
   try { return JSON.parse(text); }
-  catch { console.warn('Non-JSON response from', url.toString().slice(0, 80)); return null; }
+  catch { console.warn('Non-JSON response:', text.slice(0, 120)); return null; }
+}
+async function safeFetchJson(url, opts) {
+  const resp = await fetch(url, opts);
+  return safeJson(resp);
 }
 
 async function rpcCall(to, data, retries = 2) {
@@ -514,7 +517,8 @@ async function rpcCall(to, data, retries = 2) {
           id: 1,
         }),
       });
-      const json = await resp.json();
+      const json = await safeJson(resp);
+      if (!json) { rotateRpc(); if (i < retries) continue; throw new Error('RPC returned non-JSON'); }
       if (json.error) {
         if (json.error.message?.includes('rate limit') || json.error.code === 429) {
           rotateRpc();
@@ -662,7 +666,8 @@ async function fetchMintTimestamp(tokenId) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1 }),
     });
-    const blockJson = await blockResp.json();
+    const blockJson = await safeJson(blockResp);
+    if (!blockJson) throw new Error('RPC non-JSON');
     const currentBlock = BigInt(blockJson.result);
     const fromBlock = '0x' + (currentBlock - 1300000n).toString(16); // ~30 days on Base (2s blocks)
 
@@ -680,7 +685,8 @@ async function fetchMintTimestamp(tokenId) {
         id: 1,
       }),
     });
-    const logJson = await logResp.json();
+    const logJson = await safeJson(logResp);
+    if (!logJson) throw new Error('RPC non-JSON');
     if (!logJson.error && logJson.result && logJson.result.length > 0) {
       const mintBlock = logJson.result[0].blockNumber;
       const blkResp = await fetch(getRpcUrl(), {
@@ -688,7 +694,7 @@ async function fetchMintTimestamp(tokenId) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_getBlockByNumber', params: [mintBlock, false], id: 1 }),
       });
-      const blkJson = await blkResp.json();
+      const blkJson = await safeJson(blkResp);
       if (blkJson.result) {
         const ts = Number(BigInt(blkJson.result.timestamp));
         mintTimestampCache[key] = ts;
@@ -805,7 +811,8 @@ async function fetchBtcPriceAtTime(timestamp) {
       const to = timestamp + 300;
       const resp = await fetch(`https://api.coingecko.com/api/v3/coins/bitcoin/market_chart/range?vs_currency=usd&from=${from}&to=${to}`);
       if (resp.status === 429) continue;
-      const json = await resp.json();
+      const json = await safeJson(resp);
+      if (!json) continue;
       if (json.prices && json.prices.length > 0) {
         entryPriceCache[key] = json.prices[0][1];
         return entryPriceCache[key];
@@ -900,7 +907,8 @@ async function fetchLlamaPoolData(token0Symbol, token1Symbol, fee) {
     // Cache 10 min
     if (!llamaPoolsCache.data || Date.now() - llamaPoolsCache.ts > 600000) {
       const resp = await fetch('https://yields.llama.fi/pools');
-      const json = await resp.json();
+      const json = await safeJson(resp);
+      if (!json) throw new Error('Llama non-JSON');
       llamaPoolsCache.data = json.data;
       llamaPoolsCache.ts = Date.now();
     }
@@ -928,7 +936,8 @@ async function fetchEurRate() {
   if (cachedEurRate && Date.now() - eurRateLastFetch < 300000) return cachedEurRate;
   try {
     const resp = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=usd-coin&vs_currencies=eur');
-    const json = await resp.json();
+    const json = await safeJson(resp);
+    if (!json) throw new Error('CoinGecko non-JSON');
     cachedEurRate = json['usd-coin']?.eur || 0.92;
     eurRateLastFetch = Date.now();
     return cachedEurRate;
@@ -1303,7 +1312,8 @@ async function fetchBtcChart(days) {
       if (attempt > 0) await new Promise(r => setTimeout(r, 2000));
       const res = await fetch(`https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=${days}`);
       if (res.status === 429) { continue; }
-      const data = await res.json();
+      const data = await safeJson(res);
+      if (!data) continue;
       if (data.prices) {
         btcChartCache[days] = { data: data.prices, ts: Date.now() };
         return data.prices;
