@@ -598,13 +598,13 @@ async function discoverAllPositions() {
 
   if (count === 0) return [];
 
-  // Get all token IDs
-  const tokenIds = [];
+  // Get all token IDs in parallel
+  const tokenIdPromises = [];
   for (let i = 0; i < count; i++) {
     const idxHex = BigInt(i).toString(16).padStart(64, '0');
-    const result = await rpcCall(CONFIG.nftManager, '0x' + SEL.tokenOfOwnerByIndex + addrHex + idxHex);
-    tokenIds.push(decodeUint(result, 0));
+    tokenIdPromises.push(rpcCall(CONFIG.nftManager, '0x' + SEL.tokenOfOwnerByIndex + addrHex + idxHex).then(r => decodeUint(r, 0)));
   }
+  const tokenIds = await Promise.all(tokenIdPromises);
 
   // Fetch all positions in parallel
   const positions = await Promise.all(tokenIds.map(id => fetchSinglePosition(id)));
@@ -1175,98 +1175,52 @@ async function fetchAllHistoricalFees() {
 // ============================================================
 // Main loop
 // ============================================================
-async function update() {
-  try {
-    // Step 1: discover all positions + EUR rate
-    const [positions, eurRate] = await Promise.all([
-      discoverAllPositions(),
-      fetchEurRate(),
-    ]);
+async function processPosition(pos, eurRate) {
+  const poolAddr = await getPoolAddress(pos.token0, pos.token1, pos.fee);
+  const [poolData, feeGlobals, tickLowerData, tickUpperData, llamaData, mintTs, harvested] = await Promise.all([
+    fetchPoolSlot0(poolAddr),
+    fetchFeeGrowthGlobals(poolAddr),
+    fetchTickData(pos.tickLower, poolAddr),
+    fetchTickData(pos.tickUpper, poolAddr),
+    fetchLlamaPoolData(pos.token0Symbol, pos.token1Symbol, pos.fee),
+    fetchMintTimestamp(pos.tokenId),
+    fetchHarvestedFees(pos.tokenId, pos.token0Decimals, pos.token1Decimals),
+  ]);
+  const btcEntry = mintTs ? await fetchBtcPriceAtTime(mintTs) : null;
+  pos._harvestedFees = harvested;
+  const feesData = computeUnclaimedFees(pos, feeGlobals, tickLowerData, tickUpperData, poolData.tick, pos.token0Decimals, pos.token1Decimals);
+  return renderPositionCard(pos, poolData, feesData, eurRate, llamaData, mintTs, btcEntry);
+}
 
-    if (positions.length === 0) {
-      document.getElementById('widget').innerHTML = `
-        <div class="header"><div class="header-left"><span class="pool-name">DeFi Monitor</span><span class="chain-badge">BASE</span></div></div>
-        <div style="padding: 40px 20px; text-align: center; color: var(--text-dim);">No active positions found on Sickle wallet</div>
-      `;
-      return;
-    }
+function renderGlobalHeader(cards, eurRate) {
+  const totalPortfolioUSD = cards.reduce((s, c) => s + c.totalValueUSD, 0);
+  const currentBtcPrice = cards[0]?.currentPrice || 0;
+  const activeUncollected0 = cards.reduce((s, c) => s + (c._uncollected0 || 0), 0);
+  const activeUncollected1 = cards.reduce((s, c) => s + (c._uncollected1 || 0), 0);
 
-    console.log(`Found ${positions.length} active position(s)`);
+  const ledgerUsdc = HARVESTED_FEES_LEDGER.reduce((s, e) => s + (e.usdc || 0), 0);
+  const ledgerBtc = HARVESTED_FEES_LEDGER.reduce((s, e) => s + (e.btc || 0), 0);
+  const harvestedUsdc = Math.max(lastHistoricalFees.collected0, ledgerUsdc);
+  const harvestedBtc = Math.max(lastHistoricalFees.collected1, ledgerBtc);
 
-    // Step 2: for each position, get pool data + fees + llama
-    let totalPortfolioUSD = 0;
-    let totalFeesEUR = 0;
-    const cards = [];
+  const globalTotalFeesUSD = (harvestedUsdc + activeUncollected0) + ((harvestedBtc + activeUncollected1) * currentBtcPrice);
+  const globalElapsed = Math.floor(Date.now() / 1000) - FIRST_DEPOSIT_TS;
+  const globalAPY = (globalElapsed > 86400 && INITIAL_INVESTMENT > 0) ? (globalTotalFeesUSD / INITIAL_INVESTMENT) * (365 * 86400 / globalElapsed) * 100 : 0;
 
-    for (const pos of positions) {
-      // Get pool address
-      const poolAddr = await getPoolAddress(pos.token0, pos.token1, pos.fee);
+  const totalIn = CAPITAL_FLOWS.filter(f => f.type === 'in').reduce((s, f) => s + f.amount, 0);
+  const totalOut = CAPITAL_FLOWS.filter(f => f.type === 'out').reduce((s, f) => s + f.amount, 0);
+  const uncollectedUSD = activeUncollected0 + (activeUncollected1 * currentBtcPrice);
+  const balance = totalPortfolioUSD + uncollectedUSD + totalOut - totalIn;
 
-      // Fetch pool + fee data + mint timestamp + harvested fees in parallel
-      const [poolData, feeGlobals, tickLowerData, tickUpperData, llamaData, mintTs, harvested] = await Promise.all([
-        fetchPoolSlot0(poolAddr),
-        fetchFeeGrowthGlobals(poolAddr),
-        fetchTickData(pos.tickLower, poolAddr),
-        fetchTickData(pos.tickUpper, poolAddr),
-        fetchLlamaPoolData(pos.token0Symbol, pos.token1Symbol, pos.fee),
-        fetchMintTimestamp(pos.tokenId),
-        fetchHarvestedFees(pos.tokenId, pos.token0Decimals, pos.token1Decimals),
-      ]);
+  const now = new Date().toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
-      // Fetch BTC entry price (needs mintTs)
-      const btcEntry = mintTs ? await fetchBtcPriceAtTime(mintTs) : null;
-
-      pos._harvestedFees = harvested;
-      const feesData = computeUnclaimedFees(pos, feeGlobals, tickLowerData, tickUpperData, poolData.tick, pos.token0Decimals, pos.token1Decimals);
-      const card = renderPositionCard(pos, poolData, feesData, eurRate, llamaData, mintTs, btcEntry);
-      totalPortfolioUSD += card.totalValueUSD;
-      totalFeesEUR += card.feesEUR;
-      cards.push(card);
-    }
-
-    const now = new Date().toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
-    // Global KPIs — fees from best source (auto-detect OR ledger) + uncollected
-    const currentBtcPrice = cards[0]?.currentPrice || 0;
-    const historicalFees = await fetchAllHistoricalFees();
-
-    // Ledger = manual fallback for when BaseScan fails
-    const ledgerUsdc = HARVESTED_FEES_LEDGER.reduce((s, e) => s + (e.usdc || 0), 0);
-    const ledgerBtc = HARVESTED_FEES_LEDGER.reduce((s, e) => s + (e.btc || 0), 0);
-
-    // Use whichever source is higher (auto-detect when BaseScan works, ledger as safety net)
-    const harvestedUsdc = Math.max(historicalFees.collected0, ledgerUsdc);
-    const harvestedBtc = Math.max(historicalFees.collected1, ledgerBtc);
-
-    // Current uncollected from active positions
-    const activeUncollected0 = cards.reduce((s, c) => s + (c._uncollected0 || 0), 0);
-    const activeUncollected1 = cards.reduce((s, c) => s + (c._uncollected1 || 0), 0);
-
-    // Total fees = harvested (best of auto/ledger) + uncollected
-    const globalTotalFeesUSD = (harvestedUsdc + activeUncollected0) + ((harvestedBtc + activeUncollected1) * currentBtcPrice);
-    console.log('Global fees:', { autoUsdc: historicalFees.collected0.toFixed(4), autoBtc: historicalFees.collected1.toFixed(8), ledgerUsdc, ledgerBtc, uncollected0: activeUncollected0.toFixed(4), uncollected1: activeUncollected1.toFixed(8), totalUSD: globalTotalFeesUSD.toFixed(2) });
-    const globalTotalFeesEUR = globalTotalFeesUSD * eurRate;
-
-    // Global APY
-    const globalElapsed = Math.floor(Date.now() / 1000) - FIRST_DEPOSIT_TS;
-    const globalAPY = (globalElapsed > 86400 && INITIAL_INVESTMENT > 0) ? (globalTotalFeesUSD / INITIAL_INVESTMENT) * (365 * 86400 / globalElapsed) * 100 : 0;
-    // Capital flow balance
-    const totalIn = CAPITAL_FLOWS.filter(f => f.type === 'in').reduce((s, f) => s + f.amount, 0);
-    const totalOut = CAPITAL_FLOWS.filter(f => f.type === 'out').reduce((s, f) => s + f.amount, 0);
-    // Position value already includes compounded fees, only add uncollected
-    const uncollectedUSD = activeUncollected0 + (activeUncollected1 * currentBtcPrice);
-    const balance = totalPortfolioUSD + uncollectedUSD + totalOut - totalIn;
-
-    // Render
-    const widget = document.getElementById('widget');
-
-    const globalHeader = `
-      <div style="padding: 8px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border);">
+  return `
+    <div id="global-header" style="border-bottom: 1px solid var(--border);">
+      <div style="padding: 8px 20px; display: flex; justify-content: space-between; align-items: center;">
         <span style="font-size: 12px; font-weight: 700;">DeFi Monitor · ${CONFIG.sickleAddress.slice(0,6)}…${CONFIG.sickleAddress.slice(-4)}</span>
         <span style="font-size: 10px; color: var(--text-dim);">${now}</span>
       </div>
-
-      <div class="kpi-grid" style="background: rgba(63,185,80,0.03); border-bottom: 1px solid var(--border);">
+      <div class="kpi-grid" style="background: rgba(63,185,80,0.03);">
         <div class="kpi">
           <span class="kpi-label">Position Value</span>
           <span class="kpi-value">$${formatNum(totalPortfolioUSD, 2)}</span>
@@ -1283,19 +1237,91 @@ async function update() {
           <span class="kpi-sub">in $${formatNum(totalIn, 0)} · out $${formatNum(totalOut, 0)}</span>
         </div>
       </div>
-    `;
+    </div>
+  `;
+}
 
+// Track last historical fees for progressive rendering (start with ledger fallback)
+let lastHistoricalFees = { collected0: 0, collected1: 0 };
+
+async function update() {
+  const widget = document.getElementById('widget');
+  try {
+    // Step 1: discover positions + EUR rate in parallel
+    const [positions, eurRate] = await Promise.all([
+      discoverAllPositions(),
+      fetchEurRate(),
+    ]);
+
+    if (positions.length === 0) {
+      widget.innerHTML = `
+        <div class="header"><div class="header-left"><span class="pool-name">DeFi Monitor</span><span class="chain-badge">BASE</span></div></div>
+        <div style="padding: 40px 20px; text-align: center; color: var(--text-dim);">No active positions found on Sickle wallet</div>
+      `;
+      return;
+    }
+
+    console.log(`Found ${positions.length} active position(s)`);
+
+    // Step 2: show skeleton immediately
     widget.innerHTML = `
-      ${globalHeader}
-      <div style="padding: 6px 20px; background: var(--bg); border-bottom: 1px solid var(--border);">
-        <span style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px;">${positions.length} active position${positions.length > 1 ? 's' : ''}</span>
+      <div id="global-header" style="border-bottom: 1px solid var(--border);">
+        <div style="padding: 8px 20px; display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 12px; font-weight: 700;">DeFi Monitor · ${CONFIG.sickleAddress.slice(0,6)}…${CONFIG.sickleAddress.slice(-4)}</span>
+          <span style="font-size: 10px; color: var(--text-dim);">Loading...</span>
+        </div>
       </div>
-      ${cards.map(c => c.html).join('<div style="border-top: 2px solid var(--border);"></div>')}
+      <div style="padding: 6px 20px; background: var(--bg); border-bottom: 1px solid var(--border);">
+        <span style="font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px;">${positions.length} position${positions.length > 1 ? 's' : ''} — loading data...</span>
+      </div>
+      <div id="cards-container"></div>
       <div id="btc-chart-container" style="margin-top: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--card-bg);">${btcChartHtml}</div>
     `;
+
+    // Step 3: process all positions in parallel, render each as it arrives
+    const cards = [];
+    const cardsContainer = document.getElementById('cards-container');
+
+    await Promise.all(positions.map(pos =>
+      processPosition(pos, eurRate).then(card => {
+        cards.push(card);
+        // Append card HTML immediately
+        const div = document.createElement('div');
+        if (cardsContainer.children.length > 0) {
+          const sep = document.createElement('div');
+          sep.style.borderTop = '2px solid var(--border)';
+          cardsContainer.appendChild(sep);
+        }
+        div.innerHTML = card.html;
+        cardsContainer.appendChild(div);
+        // Update global header with partial data
+        const oldHeader = document.getElementById('global-header');
+        if (oldHeader) {
+          oldHeader.outerHTML = renderGlobalHeader(cards, eurRate);
+        } else {
+          // First card — insert header before cards
+          cardsContainer.insertAdjacentHTML('beforebegin', renderGlobalHeader(cards, eurRate));
+        }
+      }).catch(err => {
+        console.error(`Position error (${pos.tokenId}):`, err);
+        const div = document.createElement('div');
+        div.innerHTML = `<div class="error-msg">Position #${pos.tokenId}: ${err.message}</div>`;
+        cardsContainer.appendChild(div);
+      })
+    ));
+
+    // Step 4: fetch historical fees in background, update header when done
+    fetchAllHistoricalFees().then(hist => {
+      lastHistoricalFees = hist;
+      console.log('Global fees:', { autoUsdc: hist.collected0.toFixed(4), autoBtc: hist.collected1.toFixed(8) });
+      // Re-render header with accurate historical data
+      const oldHeader = document.getElementById('global-header');
+      if (oldHeader) oldHeader.outerHTML = renderGlobalHeader(cards, eurRate);
+    }).catch(e => console.warn('Historical fees failed:', e));
+
   } catch (err) {
     console.error('Update error:', err);
-    document.getElementById('widget').innerHTML += `
+    widget.innerHTML += `
       <div class="error-msg">Error: ${err.message}<br>Retrying in ${CONFIG.refreshInterval/1000}s...</div>
     `;
   }
@@ -1405,20 +1431,20 @@ async function switchBtcPeriod(days) {
   await updateBtcChart();
 }
 
-// Start — chart loads AFTER first update to avoid CoinGecko rate limit
+// Start — charts load in background after first update
 let btcChartHtml = '';
 (async () => {
   await update();
-  // Wait before chart calls — CoinGecko needs breathing room
-  await new Promise(r => setTimeout(r, 5000));
-  await fetchBtcChart(5);
-  updateBtcChart();
-  await new Promise(r => setTimeout(r, 5000));
-  fetchBtcChart(30);
-  await new Promise(r => setTimeout(r, 5000));
-  fetchBtcChart(90);
-  // Then loop
   setInterval(update, CONFIG.refreshInterval);
+  // Load BTC charts in background — stagger to avoid CoinGecko rate limit
+  setTimeout(async () => {
+    await fetchBtcChart(5);
+    updateBtcChart();
+    setTimeout(async () => {
+      fetchBtcChart(30);
+      setTimeout(() => fetchBtcChart(90), 5000);
+    }, 5000);
+  }, 3000);
   setInterval(updateBtcChart, 300000);
 })();
 </script>
